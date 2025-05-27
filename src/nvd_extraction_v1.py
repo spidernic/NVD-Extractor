@@ -26,6 +26,14 @@ import os
 import io
 import sys
 
+# Read configuration from environment variables with defaults
+CVE_AGE_DAYS = int(os.environ.get("CVE_AGE_DAYS", "360"))
+ATTACK_VECTOR_FILTER = os.environ.get("ATTACK_VECTOR", "NETWORK").upper()
+SEVERITY_FILTER = os.environ.get("SEVERITY", "CRITICAL").upper()
+OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "both").lower()
+WRITE_CSV = OUTPUT_FORMAT in ("csv", "both")
+WRITE_JSON = OUTPUT_FORMAT in ("json", "both")
+
 # Create a custom stdout capture class to save console output for the report
 class OutputCapture:
     def __init__(self):
@@ -77,9 +85,9 @@ llm_output_dir = os.path.join(output_dir, "LLM")
 if not os.path.exists(llm_output_dir):
     os.makedirs(llm_output_dir)
 
-# Calculate date range (last 360 days)
+# Calculate date range based on configured age
 end_date = datetime.now(timezone.utc)
-start_date = end_date - timedelta(days=360)
+start_date = end_date - timedelta(days=CVE_AGE_DAYS)
 
 # Define date ranges for three 120-day periods (NVD API has a 120-day limit per request)
 date_ranges = [
@@ -104,7 +112,7 @@ for period_start, period_end in date_ranges:
     params = {
         "pubStartDate": start_date_str,
         "pubEndDate": end_date_str,
-        "cvssV3Severity": "CRITICAL",  # Get only critical severity CVEs
+        "cvssV3Severity": SEVERITY_FILTER,  # Severity filter from configuration
         "resultsPerPage": 2000,         # Maximum allowed by the API
         "startIndex": 0                 # Start at the beginning
     }
@@ -127,8 +135,8 @@ for period_start, period_end in date_ranges:
                     metrics = cve_data.get("metrics", {})
                     cvss_data = metrics.get("cvssMetricV31", [{}])[0].get("cvssData", {}) if "cvssMetricV31" in metrics else {}
                     
-                    # Only process CVEs with NETWORK attack vector
-                    if cvss_data.get("attackVector") == "NETWORK":
+                    # Filter CVEs by the chosen attack vector
+                    if cvss_data.get("attackVector") == ATTACK_VECTOR_FILTER:
                         # Extract basic CVE information
                         cve_id = cve_data.get("id", "N/A")
                         
@@ -254,19 +262,19 @@ fieldnames = [
     "CWE Information", "Reference Tags", "Affects Linux", "Affects Windows", "Likely External API", "Affected CPEs"
 ]
 
-# Write critical_cves to CSV
-with open(os.path.join(csv_output_dir, f"critical_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(cve_list)
+# Write critical_cves to CSV if enabled
+if WRITE_CSV:
+    with open(os.path.join(csv_output_dir, f"critical_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(cve_list)
+    print("Saved to critical_cves CSV")
 
-print("Saved to critical_cves CSV")
-
-# Write critical_cves to JSON
-with open(os.path.join(json_output_dir, f"critical_cves_{data_stamp}.json"), "w", encoding="utf-8") as jsonfile:
-    json.dump(cve_list, jsonfile, indent=4, ensure_ascii=False)
-
-print("Saved to critical_cves JSON")
+# Write critical_cves to JSON if enabled
+if WRITE_JSON:
+    with open(os.path.join(json_output_dir, f"critical_cves_{data_stamp}.json"), "w", encoding="utf-8") as jsonfile:
+        json.dump(cve_list, jsonfile, indent=4, ensure_ascii=False)
+    print("Saved to critical_cves JSON")
 
 # Create filtered output for Linux, Windows, and External API vulnerabilities
 filtered_cves = []
@@ -279,45 +287,48 @@ for cve in cve_list:
 
 print(f"Found {len(filtered_cves)} vulnerabilities matching filtering criteria (Linux, Windows, or External APIs)")
 
-# Write filtered_cves to CSV
-with open(os.path.join(csv_output_dir, f"filtered_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(filtered_cves)
+# Write filtered_cves to CSV if enabled
+if WRITE_CSV:
+    with open(os.path.join(csv_output_dir, f"filtered_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(filtered_cves)
+    print("Saved to filtered_cves CSV")
 
-print("Saved to filtered_cves CSV")
-
-# Write filtered_cves to JSON
-with open(os.path.join(json_output_dir, f"filtered_cves_{data_stamp}.json"), "w", encoding="utf-8") as jsonfile:
-    json.dump(filtered_cves, jsonfile, indent=4, ensure_ascii=False)
-
-print("Saved to filtered_cves JSON")
+# Write filtered_cves to JSON if enabled
+if WRITE_JSON:
+    with open(os.path.join(json_output_dir, f"filtered_cves_{data_stamp}.json"), "w", encoding="utf-8") as jsonfile:
+        json.dump(filtered_cves, jsonfile, indent=4, ensure_ascii=False)
+    print("Saved to filtered_cves JSON")
 
 # Create individual filtered files for each category
 linux_cves = [cve for cve in cve_list if cve["Affects Linux"] == "Yes"]
 windows_cves = [cve for cve in cve_list if cve["Affects Windows"] == "Yes"]
 api_cves = [cve for cve in cve_list if cve["Likely External API"] == "Yes"]
 
-# Write Linux vulnerabilities to CSV
-with open(os.path.join(csv_output_dir, f"linux_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(linux_cves)
-print(f"Saved {len(linux_cves)} Linux vulnerabilities to linux_cves CSV")
+# Write Linux vulnerabilities to CSV if enabled
+if WRITE_CSV:
+    with open(os.path.join(csv_output_dir, f"linux_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(linux_cves)
+    print(f"Saved {len(linux_cves)} Linux vulnerabilities to linux_cves CSV")
 
-# Write Windows vulnerabilities to CSV
-with open(os.path.join(csv_output_dir, f"windows_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(windows_cves)
-print(f"Saved {len(windows_cves)} Windows vulnerabilities to windows_cves CSV")
+# Write Windows vulnerabilities to CSV if enabled
+if WRITE_CSV:
+    with open(os.path.join(csv_output_dir, f"windows_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(windows_cves)
+    print(f"Saved {len(windows_cves)} Windows vulnerabilities to windows_cves CSV")
 
-# Write External API vulnerabilities to CSV
-with open(os.path.join(csv_output_dir, f"api_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(api_cves)
-print(f"Saved {len(api_cves)} External API vulnerabilities to api_cves CSV")
+# Write External API vulnerabilities to CSV if enabled
+if WRITE_CSV:
+    with open(os.path.join(csv_output_dir, f"api_cves_{data_stamp}.csv"), "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(api_cves)
+    print(f"Saved {len(api_cves)} External API vulnerabilities to api_cves CSV")
 
 # Print final summary of vulnerability counts
 print("\nSummary of vulnerability counts:")
@@ -378,15 +389,16 @@ for category, cve_list_subset, description in [
         "vulnerabilities": llm_optimized_cves
     }
     
-    # Save to a JSON file with both compact and readable versions
-    llm_file_path = os.path.join(llm_output_dir, f"{category}_cves_llm_{data_stamp}.json")
-    with open(llm_file_path, "w", encoding="utf-8") as jsonfile:
-        json.dump(llm_context, jsonfile, indent=2, ensure_ascii=False)
-    
-    # Create a prompt-ready version with Markdown formatting
-    prompt_file_path = os.path.join(llm_output_dir, f"{category}_cves_prompt_{data_stamp}.md")
-    with open(prompt_file_path, "w", encoding="utf-8") as promptfile:
-        promptfile.write(f"""# {category.title()} CVE Vulnerabilities Data
+    # Save to a JSON file with both compact and readable versions if enabled
+    if WRITE_JSON:
+        llm_file_path = os.path.join(llm_output_dir, f"{category}_cves_llm_{data_stamp}.json")
+        with open(llm_file_path, "w", encoding="utf-8") as jsonfile:
+            json.dump(llm_context, jsonfile, indent=2, ensure_ascii=False)
+
+        # Create a prompt-ready version with Markdown formatting
+        prompt_file_path = os.path.join(llm_output_dir, f"{category}_cves_prompt_{data_stamp}.md")
+        with open(prompt_file_path, "w", encoding="utf-8") as promptfile:
+            promptfile.write(f"""# {category.title()} CVE Vulnerabilities Data
 
 ## Description
 {description} from the past 360 days (as of {data_stamp}).
